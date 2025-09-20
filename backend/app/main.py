@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router, prefix="/api/users", tags=["Users"])
     app.include_router(repos.router, prefix="/api/repos", tags=["Repositories"])
     app.include_router(blocks.router, prefix="/api/blocks", tags=["Blocks"])
-    app.include_router(audits.router, prefix="/api/audits", tags=["Audits"])
+    app.include_router(audits.router, prefix="/api/audits", tags=["Audits"]) 
 
     @app.get("/health")
     async def health_check():

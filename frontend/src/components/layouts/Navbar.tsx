@@ -1,5 +1,5 @@
 // src/components/layout/Navbar.tsx
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Settings,
@@ -8,11 +8,35 @@ import {
   Star,
   BookOpen,
   Search,
+  ChevronDown,
+  LogOut,
+  User as ProfileIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AuthWidget } from "../layouts/AuthWidget";
+import axios from "axios";
 
-/* ====================== Logo: Flask borbulhando ======================= */
+// Wagmi (MetaMask connection)
+import { useAccount, useConnect, useSignMessage } from "wagmi";
+import { injected } from "wagmi/connectors";
+
+/* =======================================================
+   API CONFIG (axios with JWT)
+======================================================= */
+const api = axios.create({
+  baseURL: "http://127.0.0.1:8000/api", // 👈 backend base
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("jwt_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+/* =======================================================
+   Logo Animation
+======================================================= */
 const useInjectFlaskKeyframes = () => {
   React.useEffect(() => {
     const ID = "navbar-flask-keyframes";
@@ -37,7 +61,7 @@ const FlaskLogo: React.FC<{ size?: number }> = ({ size = 36 }) => {
   useInjectFlaskKeyframes();
   return (
     <div style={{ animation: "nh-bob 2.2s ease-in-out infinite" }}>
-      <svg viewBox="0 0 64 64" width={size} height={size} fill="none" aria-hidden="true">
+      <svg viewBox="0 0 64 64" width={size} height={size} fill="none">
         <defs>
           <clipPath id="flaskNavbarBody">
             <path d="M24 8h16v4l-4 8v8l10 16c2 3-1 8-6 8H24c-5 0-8-5-6-8l10-16v-8l-4-8V8Z" />
@@ -51,18 +75,48 @@ const FlaskLogo: React.FC<{ size?: number }> = ({ size = 36 }) => {
         />
         <g clipPath="url(#flaskNavbarBody)">
           <path d="M12 40h40v16H12z" fill="hsl(var(--primary))" />
-          <circle cx="28" cy="46" r="3" fill="white" style={{ animation: "nh-bubble 1.6s infinite" }} />
-          <circle cx="36" cy="50" r="2" fill="white" style={{ animation: "nh-bubble 1.8s .2s infinite" }} />
-          <circle cx="32" cy="44" r="2.5" fill="white" style={{ animation: "nh-bubble 1.7s .1s infinite" }} />
+          <circle
+            cx="28"
+            cy="46"
+            r="3"
+            fill="white"
+            style={{ animation: "nh-bubble 1.6s infinite" }}
+          />
+          <circle
+            cx="36"
+            cy="50"
+            r="2"
+            fill="white"
+            style={{ animation: "nh-bubble 1.8s .2s infinite" }}
+          />
+          <circle
+            cx="32"
+            cy="44"
+            r="2.5"
+            fill="white"
+            style={{ animation: "nh-bubble 1.7s .1s infinite" }}
+          />
         </g>
-        <rect x="28" y="6" width="8" height="6" rx="1" fill="hsl(var(--primary))" />
+        <rect
+          x="28"
+          y="6"
+          width="8"
+          height="6"
+          rx="1"
+          fill="hsl(var(--primary))"
+        />
       </svg>
     </div>
   );
 };
 
-/* ====================== Hook: clique fora ======================= */
-const useOnClickOutside = (ref: React.RefObject<HTMLElement>, handler: () => void) => {
+/* =======================================================
+   Hamburger Menu
+======================================================= */
+const useOnClickOutside = (
+  ref: React.RefObject<HTMLElement>,
+  handler: () => void
+) => {
   React.useEffect(() => {
     const listener = (e: MouseEvent) => {
       if (!ref.current || ref.current.contains(e.target as Node)) return;
@@ -73,9 +127,8 @@ const useOnClickOutside = (ref: React.RefObject<HTMLElement>, handler: () => voi
   }, [ref, handler]);
 };
 
-/* ====================== Hamburger Menu ======================= */
 const HamburgerMenu: React.FC = () => {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   useOnClickOutside(ref, () => setOpen(false));
@@ -87,37 +140,19 @@ const HamburgerMenu: React.FC = () => {
 
   return (
     <div className="relative" ref={ref}>
-      <Button
-        variant="ghost"
-        className="p-2"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
+      <Button variant="ghost" className="p-2" onClick={() => setOpen((v) => !v)}>
         <MenuIcon className="w-5 h-5" />
       </Button>
       {open && (
         <div className="absolute left-0 mt-2 w-56 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-20">
-          <button
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
-            onClick={() => go("/explore")}
-          >
-            <Home className="w-4 h-4" />
-            Home
+          <button onClick={() => go("/explore")} className="px-3 py-2 flex gap-2 hover:bg-muted/60">
+            <Home className="w-4 h-4" /> Home
           </button>
-          <button
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
-            onClick={() => go("/my-repositories")}
-          >
-            <BookOpen className="w-4 h-4" />
-            My Repositories
+          <button onClick={() => go("/MyRepository")} className="px-3 py-2 flex gap-2 hover:bg-muted/60">
+            <BookOpen className="w-4 h-4" /> My Repositories
           </button>
-          <button
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
-            onClick={() => go("/favorites")}
-          >
-            <Star className="w-4 h-4" />
-            Favorites
+          <button onClick={() => go("/favorites")} className="px-3 py-2 flex gap-2 hover:bg-muted/60">
+            <Star className="w-4 h-4" /> Favorites
           </button>
         </div>
       )}
@@ -125,60 +160,147 @@ const HamburgerMenu: React.FC = () => {
   );
 };
 
-/* ====================== Título de contexto ======================= */
-const getTitleFromPath = (path: string) => {
-  if (path === "/" || path.startsWith("/explore")) return "Explore";
-  if (path.startsWith("/repository/")) return "Repository";
-  if (path.startsWith("/my-repositories")) return "My Repositories";
-  if (path.startsWith("/favorites")) return "Favorites";
-  if (path.startsWith("/editor")) return "Create Repository";
-  if (path.startsWith("/editor")) return "Research Editor";
-  return "Infinita Science Hub";
+/* =======================================================
+   AuthButton (Login + Avatar)
+======================================================= */
+type UserProfile = {
+  username: string;
+  profile_image_url?: string;
+  address: string; // ✅ corrected
 };
 
-/* ====================== Keyframes: botão brilhando ======================= */
-const useInjectCreateButtonKeyframes = () => {
-  React.useEffect(() => {
-    const ID = "create-button-keyframes";
-    if (typeof document === "undefined" || document.getElementById(ID)) return;
-    const style = document.createElement("style");
-    style.id = ID;
-    style.textContent = `
-@keyframes nh-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-@keyframes nh-glow {
-  0%,100% { box-shadow: 0 0 4px hsl(var(--primary)/0.6), 0 0 8px hsl(var(--primary)/0.4); }
-  50%     { box-shadow: 0 0 8px hsl(var(--primary)/0.8), 0 0 16px hsl(var(--primary)/0.6); }
-}
-.create-glow {
-  position: relative;
-  background: linear-gradient(
-    120deg,
-    hsl(var(--primary)) 0%,
-    hsl(var(--primary)/0.6) 20%,
-    hsl(var(--primary)) 40%
-  );
-  background-size: 200% 100%;
-  animation: nh-shimmer 3s linear infinite, nh-glow 2s ease-in-out infinite;
-  color: white !important;
-}
-`;
-    document.head.appendChild(style);
+const AuthButton: React.FC = () => {
+  const navigate = useNavigate();
+  const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { signMessageAsync } = useSignMessage();
+
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [statusText, setStatusText] = useState("Login with MetaMask");
+  const [isLoading, setIsLoading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const fetchProfile = useCallback(async () => {
+    try {
+      const res = await api.get("/users/me"); // ✅ ensure backend route
+      setUser(res.data);
+    } catch {
+      setUser(null);
+    }
   }, []);
+
+  const handleAuthentication = useCallback(
+    async (walletAddress: string) => {
+      setIsLoading(true);
+      try {
+        const nonceRes = await api.post("/auth/nonce", { address: walletAddress });
+        const { nonce } = nonceRes.data;
+        const signature = await signMessageAsync({ message: nonce });
+        const loginRes = await api.post("/auth/login", { address: walletAddress, signature });
+        const { access_token } = loginRes.data;
+        localStorage.setItem("jwt_token", access_token);
+        await fetchProfile();
+        navigate("/explore");
+      } catch (err) {
+        console.error("Login error:", err);
+        setStatusText("Try again");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [fetchProfile, navigate, signMessageAsync]
+  );
+
+  useEffect(() => {
+    if (isConnected && address && localStorage.getItem("jwt_token")) {
+      fetchProfile();
+    }
+  }, [isConnected, address, fetchProfile]);
+
+  const handleConnectClick = () => {
+    if (isConnected && address) {
+      handleAuthentication(address);
+    } else {
+      const injectedConnector = connectors.find((c) => c.id === "injected");
+      if (injectedConnector) connect({ connector: injectedConnector });
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem("jwt_token");
+    setUser(null);
+    setMenuOpen(false);
+    navigate("/explore");
+  };
+
+  if (isLoading) {
+    return (
+      <button disabled className="btn-primary px-4 py-2">
+        {statusText}
+      </button>
+    );
+  }
+
+  if (!user) {
+    return (
+      <button onClick={handleConnectClick} className="btn-primary px-4 py-2">
+        {statusText}
+      </button>
+    );
+  }
+
+  const initials = user.username?.charAt(0).toUpperCase() || "U";
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setMenuOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1 hover:bg-muted"
+      >
+        {user.profile_image_url ? (
+          <img
+            src={user.profile_image_url}
+            alt={user.username}
+            className="w-8 h-8 rounded-full object-cover"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-primary/20 text-primary font-bold flex items-center justify-center">
+            {initials}
+          </div>
+        )}
+        <span className="text-sm">{user.username}</span>
+        <ChevronDown className="w-4 h-4" />
+      </button>
+      {menuOpen && (
+        <div className="absolute right-0 mt-2 w-48 bg-card border border-border rounded shadow-lg z-10">
+          <Link
+            to={`/profile/${user.address}`} // ✅ fixed
+            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
+            onClick={() => setMenuOpen(false)}
+          >
+            <ProfileIcon className="w-4 h-4" /> Profile
+          </Link>
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-muted/60"
+          >
+            <LogOut className="w-4 h-4" /> Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
+/* =======================================================
+   Main Navbar
+======================================================= */
 type NavbarProps = { currentTitle?: string };
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTitle }) => {
   const location = useLocation();
-  const title = currentTitle ?? getTitleFromPath(location.pathname);
+  const title = currentTitle ?? location.pathname;
 
-  // injeta animação do botão
-  useInjectCreateButtonKeyframes();
-
-  // Atalho de teclado "/" foca a busca (UX GitHub-like)
   const inputRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -194,7 +316,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTitle }) => {
   return (
     <header className="bg-card border-b border-border">
       <div className="px-4 md:px-6 py-3 flex items-center justify-between gap-3">
-        {/* Left: Hamburger + Logo */}
+        {/* Left */}
         <div className="flex items-center gap-2">
           <HamburgerMenu />
           <Link to="/explore" className="flex items-center gap-2">
@@ -202,36 +324,29 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTitle }) => {
           </Link>
         </div>
 
-        {/* Center: título + busca */}
+        {/* Center */}
         <div className="flex-1 flex items-center justify-center gap-4 min-w-0">
-          <span className="text-sm md:text-base font-medium text-foreground truncate">
-            {title}
-          </span>
+          <span className="text-sm md:text-base font-medium truncate">{title}</span>
           <div className="hidden md:flex items-center relative w-full max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" />
             <input
               ref={inputRef}
               type="text"
               placeholder="Type / to search"
-              className="w-full rounded-md border border-border bg-background pl-9 pr-10 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              aria-label="Search"
+              className="w-full rounded-md border pl-9 pr-10 py-1.5 text-sm"
             />
-            <kbd className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[10px] px-1.5 py-0.5 rounded border border-border bg-card text-muted-foreground">
+            <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] border px-1.5 rounded">
               /
             </kbd>
           </div>
         </div>
 
-        {/* Right: ações */}
+        {/* Right */}
         <div className="flex items-center gap-3">
-          <Link to="/editor" className="btn-primary hidden sm:inline-flex create-glow">
+          <Link to="/editor" className="btn-primary hidden sm:inline-flex">
             Create
           </Link>
-          <Button variant="ghost" className="hidden sm:inline-flex items-center gap-2">
-            <Settings className="w-4 h-4" />
-            <span className="hidden lg:inline">Settings</span>
-          </Button>
-          <AuthWidget />
+          <AuthButton />
         </div>
       </div>
     </header>

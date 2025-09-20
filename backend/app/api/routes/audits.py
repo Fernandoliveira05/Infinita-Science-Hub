@@ -1,69 +1,62 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse
-from typing import Optional
-import httpx
+from fastapi import APIRouter, Depends, HTTPException, status, Header
+from typing import List, Dict, Any
+from uuid import UUID
 
+from app.models.schema import BlockAuditResult, AuditLogOut
+from app.services import supabase_service
 from app.core.config import settings
 
-router = APIRouter(prefix="/audits", tags=["Audits"])
+router = APIRouter()
 
-
-
-@router.post("/analyze-block")
-async def analyze_block(
-    block_id: str = Form(...),
-    block_type: str = Form(..., description="text, image, video, audio, reference"),
-    title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
-):
+# --- Validação de Segurança do Webhook ---
+async def verify_webhook_token(x_webhook_secret: str = Header(...)):
     """
-    Envia o bloco (conteúdo + metadados) para o n8n realizar auditoria.
-    O n8n devolve status (`in_review`, `validated`, `error`) e descrição gerada pela IA.
+    Uma camada simples de segurança para garantir que apenas o N8N/IA possa chamar nosso webhook.
     """
+    if settings.WEBHOOK_SECRET is None:
+        # Se a variável não estiver configurada, não validamos, mas alertamos.
+        # Em produção, isso deveria lançar um erro.
+        print("ALERTA: WEBHOOK_SECRET não configurado, o webhook está desprotegido.")
+        return
+    if x_webhook_secret != settings.WEBHOOK_SECRET:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Secret do webhook inválido.")
 
-    payload = {
-        "block_id": block_id,
-        "block_type": block_type,
-        "title": title,
-        "description": description,
+# --- Rotas ---
+
+@router.post("/webhook/block-audit", response_model=AuditLogOut, dependencies=[Depends(verify_webhook_token)])
+async def receive_block_audit_result(result: BlockAuditResult):
+    """
+    Endpoint para a IA (N8N) enviar o resultado da análise de um bloco.
+    """
+    audit_log = supabase_service.create_audit_log_and_update_block(result.dict())
+    return audit_log
+
+@router.get("/repos/{repo_id}/audits", response_model=List[AuditLogOut])
+async def get_repository_audits(repo_id: UUID):
+    """
+    Busca todos os logs de auditoria de um repositório específico.
+    """
+    return supabase_service.get_audit_logs_for_repo(str(repo_id))
+
+@router.post("/repos/{repo_id}/submit-final-review")
+async def submit_repository_for_final_review(repo_id: UUID):
+    """
+    Coleta todos os resultados de auditoria e os envia para uma análise final da IA.
+    (Esta é uma implementação de exemplo)
+    """
+    audit_logs = supabase_service.get_audit_logs_for_repo(str(repo_id))
+    
+    if not audit_logs:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nenhum bloco foi auditado ainda. Não é possível submeter para revisão final.")
+
+    # Aqui, você enviaria `audit_logs` para um segundo webhook da IA
+    # que faria a análise consolidada.
+    # Ex: final_review = await ai_service.submit_repo_for_final_analysis(audit_logs)
+    
+    # Por enquanto, retornamos os logs coletados como confirmação.
+    return {
+        "message": "Repositório enviado para revisão final com sucesso.",
+        "repo_id": repo_id,
+        "audit_count": len(audit_logs),
+        "audit_logs": audit_logs
     }
-
-    files = None
-    if file:
-        files = {"file": (file.filename, await file.read(), file.content_type)}
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{settings.n8n_base_url}{settings.n8n_workflow_analyze_block}",
-                data=payload,
-                files=files,
-                headers={
-                    "Authorization": f"Bearer {settings.n8n_api_key}"
-                } if settings.n8n_api_key else None,
-            )
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=500, detail="n8n analysis failed")
-
-        result = response.json()
-
-        # Exemplo esperado do n8n:
-        # {
-        #   "status": "validated",
-        #   "ai_description": "This block contains an image of the experiment setup...",
-        #   "confidence": 0.92
-        # }
-
-        return JSONResponse(
-            content={
-                "block_id": block_id,
-                "status": result.get("status", "in_review"),
-                "ai_description": result.get("ai_description", ""),
-                "confidence": result.get("confidence"),
-            }
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Audit failed: {str(e)}")
