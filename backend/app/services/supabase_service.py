@@ -112,3 +112,82 @@ def insert_or_update_user_profile(
         logger.error(f"Exceção ao fazer upsert do perfil: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro interno ao atualizar o perfil: {e}")
 
+# --- Funções de Serviço para Repositórios (Adicionadas) ---
+
+def create_repository(repo_data: dict) -> dict:
+    """Cria um novo repositório no banco de dados."""
+    logger.info(f"Criando novo repositório: {repo_data.get('name')}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').insert(repo_data).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao criar repositório: {e}")
+
+def get_public_repositories() -> list[dict]:
+    """Lista todos os repositórios públicos."""
+    logger.info("Buscando todos os repositórios públicos.")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('visibility', 'public').execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar repositórios: {e}")
+
+def get_user_repositories(user_address: str) -> list[dict]:
+    """Lista os repositórios de um usuário específico."""
+    logger.info(f"Buscando repositórios para o usuário: {user_address}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('owner_address', user_address).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar repositórios do usuário: {e}")
+
+def get_repository_by_id(repo_id: str) -> dict | None:
+    """Busca um único repositório pelo seu ID."""
+    logger.info(f"Buscando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('id', repo_id).single().execute()
+        return response.data
+    except Exception:
+        return None
+
+def update_repository(repo_id: str, update_data: dict) -> dict:
+    """Atualiza os dados de um repositório."""
+    logger.info(f"Atualizando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+        response = supabase.table('repositories').update(update_data).eq('id', repo_id).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar repositório: {e}")
+
+def delete_repository(repo_id: str):
+    """Deleta um repositório."""
+    logger.info(f"Deletando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        supabase.table('repositories').delete().eq('id', repo_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar repositório: {e}")
+
+def increment_column(repo_id: str, column_name: str) -> int:
+    """Incrementa um contador (stars, forks) de forma segura usando uma função do DB."""
+    logger.info(f"Incrementando '{column_name}' para o repositório ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.rpc('increment_counter', {'repo_id': repo_id, 'column_name': column_name}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao incrementar contador: {e}")
+
