@@ -1,112 +1,107 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import time, uuid
+# app/api/routes/blocks.py
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
+from typing import List, Dict, Any, Optional
+from uuid import UUID
 
-from app.api.routes.auth import get_me  # mock de auth, depois trocamos por Depends(get_current_user)
+from app.models.schema import BlockCreate, BlockUpdate, BlockOut
+from app.services import supabase_service, ai_services
+from app.api.routes.auth import get_current_user
 
-router = APIRouter(prefix="/blocks", tags=["Blocks"])
+router = APIRouter()
 
-# Mock DB em memória (no futuro → Supabase)
-blocks_db: Dict[str, Dict[str, Any]] = {}  # {block_id: block_data}
+@router.post("/", response_model=BlockOut, status_code=status.HTTP_201_CREATED)
+async def create_block(
+    data: BlockCreate,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    repo = supabase_service.get_repository_by_id(str(data.repo_id))
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repositório não encontrado.")
 
+    block_data = data.dict()
+    block_data['owner_address'] = user["address"]
+    block_data['repo_id'] = str(block_data['repo_id'])
 
-# ================== MODELS ==================
-class BlockBase(BaseModel):
-    repo_id: str
-    type: str  # "text" | "image" | "video" | "audio" | "reference"
-    title: Optional[str] = None
-    description: Optional[str] = None
-    content: Optional[Dict[str, Any]] = {}
-    status: str = "in_review"  # sempre nasce assim
-
-class BlockCreate(BlockBase):
-    pass
-
-class BlockUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    content: Optional[Dict[str, Any]] = None
-
-class BlockOut(BlockBase):
-    id: str
-    owner: str
-    created_at: float
-    updated_at: float
-
-
-# ================== ROTAS ==================
-@router.post("/", response_model=BlockOut)
-async def create_block(data: BlockCreate, user=Depends(get_me)):
-    """
-    Cria um novo proof block dentro de um repositório.
-    """
-    block_id = str(uuid.uuid4())
-    block = {
-        "id": block_id,
-        "repo_id": data.repo_id,
-        "type": data.type,
-        "title": data.title,
-        "description": data.description,
-        "content": data.content,
-        "status": "in_review",  # sempre nasce em revisão
-        "owner": user["address"],
-        "created_at": time.time(),
-        "updated_at": time.time(),
-    }
-    blocks_db[block_id] = block
-    return block
-
+    new_block = supabase_service.create_block(block_data)
+    background_tasks.add_task(ai_services.submit_block_for_analysis, BlockOut(**new_block))
+    return new_block
 
 @router.get("/repo/{repo_id}", response_model=List[BlockOut])
-async def list_blocks(repo_id: str):
-    """
-    Lista todos os blocks de um repositório.
-    """
-    return [b for b in blocks_db.values() if b["repo_id"] == repo_id]
-
+async def list_blocks(repo_id: UUID):
+    return supabase_service.list_blocks_for_repo(str(repo_id))
 
 @router.get("/{block_id}", response_model=BlockOut)
-async def get_block(block_id: str):
-    """
-    Retorna os detalhes de um block.
-    """
-    block = blocks_db.get(block_id)
+async def get_block(block_id: str):  # <<<< trocado para str
+    block = supabase_service.get_block_by_id(block_id)
     if not block:
-        raise HTTPException(status_code=404, detail="Block not found")
+        raise HTTPException(status_code=404, detail="Bloco não encontrado")
     return block
-
 
 @router.put("/{block_id}", response_model=BlockOut)
-async def update_block(block_id: str, data: BlockUpdate, user=Depends(get_me)):
-    """
-    Atualiza título, descrição ou conteúdo de um block.
-    O status não pode ser alterado manualmente.
-    """
-    block = blocks_db.get(block_id)
+async def update_block(
+    block_id: str,  # <<<< trocado para str
+    data: BlockUpdate,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    block = supabase_service.get_block_by_id(block_id)
     if not block:
-        raise HTTPException(status_code=404, detail="Block not found")
+        raise HTTPException(status_code=404, detail="Bloco não encontrado")
 
-    if block["owner"] != user["address"]:
-        raise HTTPException(status_code=403, detail="Not your block")
+    if block["owner_address"] != user["address"]:
+        raise HTTPException(status_code=403, detail="Acesso negado: você não é o dono do bloco")
 
-    updates = data.dict(exclude_unset=True)
-    block.update({**updates, "updated_at": time.time()})
-    blocks_db[block_id] = block
-    return block
+    update_data = data.dict(exclude_unset=True)
+    updated_block = supabase_service.update_block(block_id, update_data)
+    return updated_block
 
-
-@router.delete("/{block_id}")
-async def delete_block(block_id: str, user=Depends(get_me)):
-    """
-    Remove um block do repositório.
-    """
-    block = blocks_db.get(block_id)
+@router.delete("/{block_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_block(block_id: str,  # <<<< trocado para str
+                       user: Dict[str, Any] = Depends(get_current_user)):
+    block = supabase_service.get_block_by_id(block_id)
     if not block:
-        raise HTTPException(status_code=404, detail="Block not found")
+        raise HTTPException(status_code=404, detail="Bloco não encontrado")
 
-    if block["owner"] != user["address"]:
-        raise HTTPException(status_code=403, detail="Not your block")
+    if block["owner_address"] != user["address"]:
+        raise HTTPException(status_code=403, detail="Acesso negado: você não é o dono do bloco")
 
-    del blocks_db[block_id]
-    return {"detail": "Block deleted"}
+    supabase_service.delete_block(block_id)
+    return None
+
+# --- Upload bruto de arquivo (se você adicionou essa rota, ajuste o tipo também) ---
+
+@router.post("/{block_id}/assets", status_code=status.HTTP_201_CREATED)
+async def upload_block_asset(
+    block_id: str,  # <<<< trocado para str
+    file: UploadFile = File(...),
+    kind: Optional[str] = Form(None),
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    block = supabase_service.get_block_by_id(block_id)
+    if not block:
+        raise HTTPException(status_code=404, detail="Bloco não encontrado")
+
+    if block["owner_address"] != user["address"]:
+        raise HTTPException(status_code=403, detail="Acesso negado: você não é o dono do bloco")
+
+    public_url = await supabase_service.upload_block_asset(
+        file=file, block_id=block_id, user_address=user["address"], kind=kind
+    )
+    return {"url": public_url, "filename": file.filename, "mime": file.content_type, "kind": kind or "other"}
+
+@router.delete("/{block_id}/assets", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_block_asset(
+    block_id: str,  # <<<< trocado para str
+    asset_url: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    block = supabase_service.get_block_by_id(block_id)
+    if not block:
+        raise HTTPException(status_code=404, detail="Bloco não encontrado")
+
+    if block["owner_address"] != user["address"]:
+        raise HTTPException(status_code=403, detail="Acesso negado: você não é o dono do bloco")
+
+    await supabase_service.delete_block_asset(asset_url)
+    return None

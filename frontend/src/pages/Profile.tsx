@@ -1,266 +1,273 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { User, MapPin, Calendar, GitFork, DollarSign, Star, Settings, Plus } from "lucide-react";
+// src/pages/Profile.tsx
+import { useState, useEffect } from "react";
+import { useParams, Link } from "react-router-dom";
+import axios from "axios";
+import {
+  Upload,
+  GitFork,
+  DollarSign,
+  Edit3,
+  Save,
+  X,
+} from "lucide-react";
+import { Navbar } from "@/components/layouts/Navbar";
+
+const userApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/users" });
+const repoApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/repos" });
+
+// interceptors para JWT
+[userApi, repoApi].forEach((api) =>
+  api.interceptors.request.use((config) => {
+    const token = localStorage.getItem("jwt_token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  })
+);
+
+type UserProfile = {
+  address: string;
+  username?: string;
+  bio?: string;
+  profile_image_url?: string;
+};
+
+type Repository = {
+  id: string;
+  name: string;
+  description?: string;
+  forks: number;
+  donations: number;
+  updated_at: string;
+  visibility: string;
+};
 
 const Profile = () => {
   const { userId } = useParams();
-  
-  // Mock user data
-  const user = {
-    name: "Dr. Sarah Chen",
-    avatar: "https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=150&h=150&fit=crop&crop=face",
-    bio: "Quantum physicist specializing in biological systems. Passionate about bridging the gap between quantum mechanics and life sciences through innovative research methodologies.",
-    location: "Infinita City, Research District",
-    joinDate: "March 2023",
-    stats: {
-      researches: 12,
-      forks: 156,
-      donations: 8.4,
-      followers: 284
-    },
-    repositories: [
-      {
-        id: "1",
-        title: "Quantum Entanglement in Biological Systems",
-        status: "validated",
-        forks: 23,
-        donations: 1.2,
-        updatedAt: "2 days ago"
-      },
-      {
-        id: "2",
-        title: "Photosynthetic Quantum Coherence Studies",
-        status: "in-review", 
-        forks: 8,
-        donations: 0.5,
-        updatedAt: "1 week ago"
-      },
-      {
-        id: "3",
-        title: "Bio-inspired Quantum Computing Models",
-        status: "validated",
-        forks: 34,
-        donations: 2.1,
-        updatedAt: "2 weeks ago"
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [repos, setRepos] = useState<Repository[]>([]);
+  const [isOwner, setIsOwner] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // edit mode
+  const [editMode, setEditMode] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newBio, setNewBio] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        let res;
+        if (userId) {
+          res = await userApi.get(`/${userId}`);
+          setIsOwner(false);
+        } else {
+          res = await userApi.get("/me");
+          setIsOwner(true);
+        }
+        setUser(res.data);
+        setNewUsername(res.data.username || "");
+        setNewBio(res.data.bio || "");
+      } catch (err) {
+        console.error("Error loading profile:", err);
+      } finally {
+        setLoading(false);
       }
-    ]
-  };
+    };
 
-  const [activeTab, setActiveTab] = useState("repositories");
+    const fetchRepos = async () => {
+      try {
+        const res = userId
+          ? await repoApi.get(`/mine`, {
+              headers: { "X-User-Address": userId }, // ajustar backend se necessário
+            })
+          : await repoApi.get("/mine");
+        setRepos(res.data);
+      } catch (err) {
+        console.error("Error loading repositories:", err);
+      }
+    };
 
-  const getStatusTag = (status: string) => {
-    switch (status) {
-      case 'validated':
-        return <span className="tag-validated">Validated</span>;
-      case 'in-review':
-        return <span className="tag-review">In Review</span>;
-      case 'free':
-        return <span className="tag-free">Free License</span>;
-      default:
-        return <span className="tag-error">Error</span>;
+    fetchProfile();
+    fetchRepos();
+  }, [userId]);
+
+  const handleUpdateProfile = async () => {
+    try {
+      const res = await userApi.put("/me", {
+        username: newUsername,
+        bio: newBio,
+      });
+      setUser(res.data);
+      alert("Profile updated successfully!");
+      setEditMode(false);
+    } catch (err) {
+      console.error(err);
+      alert("Error updating profile");
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-card border-b border-border shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <Link to="/" className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-lg">IS</span>
-              </div>
-              <span className="font-bold text-xl text-foreground">Infinita Science Hub</span>
-            </Link>
-            
-            <nav className="flex items-center space-x-6">
-              <Link to="/explore" className="btn-ghost">Explore</Link>
-              <Link to="/editor" className="btn-ghost">New Research</Link>
-              <button className="btn-ghost flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                Settings
-              </button>
-            </nav>
-          </div>
-        </div>
-      </header>
+  const handleUploadAvatar = async () => {
+    if (!avatarFile) return;
+    const formData = new FormData();
+    formData.append("file", avatarFile);
+    try {
+      const res = await userApi.post("/me/avatar", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setUser(res.data);
+      alert("Avatar updated!");
+      setAvatarFile(null);
+    } catch (err) {
+      console.error(err);
+      alert("Error updating avatar");
+    }
+  };
 
+  if (loading) return <p className="p-6">Loading...</p>;
+  if (!user) return <p className="p-6">User not found</p>;
+
+  return (
+    <>
+      <Navbar currentTitle="Profile" />
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Profile Header */}
         <div className="card-professional mb-8">
           <div className="flex flex-col md:flex-row gap-8">
-            {/* Avatar and Basic Info */}
+            {/* Avatar */}
             <div className="flex flex-col items-center md:items-start">
-              <div className="w-32 h-32 rounded-2xl overflow-hidden mb-4 shadow-lg">
-                <img 
-                  src={user.avatar} 
-                  alt={user.name}
+              <div className="w-32 h-32 rounded-2xl overflow-hidden mb-4 shadow-lg relative">
+                <img
+                  src={user.profile_image_url || "/default-avatar.png"}
+                  alt={user.username || "User Avatar"}
                   className="w-full h-full object-cover"
                 />
               </div>
-              
-              <div className="text-center md:text-left">
-                <h1 className="text-3xl font-bold text-foreground mb-2">
-                  {user.name}
-                </h1>
-                
-                <div className="flex flex-col gap-2 text-gray-500 mb-4">
-                  <div className="flex items-center gap-2 justify-center md:justify-start">
-                    <MapPin className="w-4 h-4" />
-                    <span className="text-sm">{user.location}</span>
-                  </div>
-                  <div className="flex items-center gap-2 justify-center md:justify-start">
-                    <Calendar className="w-4 h-4" />
-                    <span className="text-sm">Joined {user.joinDate}</span>
-                  </div>
-                </div>
-                
-                <button className="btn-primary flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  Follow Researcher
-                </button>
-              </div>
-            </div>
 
-            {/* Bio and Stats */}
-            <div className="flex-1">
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-foreground mb-3">About</h2>
-                <p className="text-gray-600 leading-relaxed">
-                  {user.bio}
-                </p>
-              </div>
-              
-              <div className="mb-6">
-                <p className="text-sm text-gray-500 mb-2">
-                  <strong>Research Focus:</strong> Your profile is your scientific portfolio inside Infinita City.
-                </p>
-              </div>
+              {/* Upload avatar in edit mode */}
+              {isOwner && editMode && (
+                <div className="flex flex-col gap-2 mb-4">
+                  <input
+                    type="file"
+                    onChange={(e) =>
+                      setAvatarFile(e.target.files?.[0] || null)
+                    }
+                    className="text-sm"
+                  />
+                  <button
+                    onClick={handleUploadAvatar}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" /> Upload Avatar
+                  </button>
+                </div>
+              )}
 
-              {/* Stats Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                  <div className="text-2xl font-bold text-foreground mb-1">
-                    {user.stats.researches}
-                  </div>
-                  <div className="text-sm text-gray-500">Researches</div>
+              {!editMode ? (
+                <>
+                  <h1 className="text-3xl font-bold">
+                    {user.username || "Your Name Here"}
+                  </h1>
+                  <p className="text-gray-600">
+                    {user.bio || "Tell us about yourself..."}
+                  </p>
+                </>
+              ) : (
+                <div className="flex flex-col gap-2 w-full max-w-sm">
+                  <input
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    className="input-professional w-full"
+                    placeholder="Enter your username"
+                  />
+                  <textarea
+                    value={newBio}
+                    onChange={(e) => setNewBio(e.target.value)}
+                    className="input-professional w-full"
+                    placeholder="Write a short bio"
+                  />
                 </div>
-                
-                <div className="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                  <div className="text-2xl font-bold text-foreground mb-1">
-                    {user.stats.forks}
-                  </div>
-                  <div className="text-sm text-gray-500">Forks</div>
+              )}
+
+              {/* Buttons */}
+              {isOwner && (
+                <div className="flex gap-3 mt-4">
+                  {!editMode ? (
+                    <button
+                      onClick={() => setEditMode(true)}
+                      className="btn-primary flex items-center gap-2"
+                    >
+                      <Edit3 className="w-4 h-4" /> Edit Profile
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleUpdateProfile}
+                        className="btn-primary flex items-center gap-2"
+                      >
+                        <Save className="w-4 h-4" /> Save
+                      </button>
+                      <button
+                        onClick={() => setEditMode(false)}
+                        className="btn-ghost flex items-center gap-2"
+                      >
+                        <X className="w-4 h-4" /> Cancel
+                      </button>
+                    </>
+                  )}
                 </div>
-                
-                <div className="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                  <div className="text-2xl font-bold text-primary mb-1">
-                    {user.stats.donations} ETH
-                  </div>
-                  <div className="text-sm text-gray-500">Donations</div>
-                </div>
-                
-                <div className="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                  <div className="text-2xl font-bold text-foreground mb-1">
-                    {user.stats.followers}
-                  </div>
-                  <div className="text-sm text-gray-500">Followers</div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Public repositories */}
         <div className="card-professional">
-          <div className="border-b border-border mb-6">
-            <nav className="flex space-x-8">
-              {["repositories", "activity", "contributions"].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                    activeTab === tab
-                      ? "border-primary text-primary"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
+          <h2 className="text-2xl font-bold mb-6">Public Repositories</h2>
+          {repos.length > 0 ? (
+            <div className="grid gap-6">
+              {repos.map((repo) => (
+                <div
+                  key={repo.id}
+                  className="border border-border rounded-xl p-6 hover:shadow-md transition-all duration-200"
                 >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          {/* Tab Content */}
-          <div className="min-h-96">
-            {activeTab === "repositories" && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-bold text-foreground">Research Repositories</h3>
-                  <Link to="/editor" className="btn-primary flex items-center gap-2">
-                    <Plus className="w-4 h-4" />
-                    New Research
-                  </Link>
-                </div>
-
-                <div className="grid gap-6">
-                  {user.repositories.map((repo) => (
-                    <div key={repo.id} className="border border-border rounded-xl p-6 hover:shadow-md transition-all duration-200">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <Link
-                            to={`/repository/${repo.id}`}
-                            className="text-xl font-bold text-foreground hover:text-primary transition-colors"
-                          >
-                            {repo.title}
-                          </Link>
-                          <p className="text-gray-500 text-sm mt-1">
-                            Updated {repo.updatedAt}
-                          </p>
-                        </div>
-                        {getStatusTag(repo.status)}
-                      </div>
-                      
-                      <div className="flex items-center gap-6 text-sm text-gray-500">
-                        <div className="flex items-center gap-2">
-                          <GitFork className="w-4 h-4" />
-                          {repo.forks} forks
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="w-4 h-4" />
-                          {repo.donations} ETH donated
-                        </div>
-                      </div>
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <Link
+                        to={`/repository/${repo.id}`}
+                        className="text-lg font-bold text-foreground hover:text-primary transition-colors"
+                      >
+                        {repo.name}
+                      </Link>
+                      <p className="text-gray-500 text-sm">
+                        {repo.description || "No description provided"}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        Updated{" "}
+                        {new Date(repo.updated_at).toLocaleDateString()}
+                      </p>
                     </div>
-                  ))}
+                    <span className="text-xs px-2 py-1 rounded bg-gray-200">
+                      {repo.visibility}
+                    </span>
+                  </div>
+                  <div className="flex gap-6 text-sm text-gray-500">
+                    <span className="flex gap-2 items-center">
+                      <GitFork className="w-4 h-4" /> {repo.forks} forks
+                    </span>
+                    <span className="flex gap-2 items-center">
+                      <DollarSign className="w-4 h-4" /> {repo.donations} ETH
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {activeTab === "activity" && (
-              <div className="space-y-6">
-                <h3 className="text-2xl font-bold text-foreground">Recent Activity</h3>
-                <div className="text-center py-12">
-                  <p className="text-gray-500 mb-4">Activity feed will show research updates, forks, and collaborations.</p>
-                  <p className="text-sm text-gray-400">Feature coming soon...</p>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "contributions" && (
-              <div className="space-y-6">
-                <h3 className="text-2xl font-bold text-foreground">Contributions</h3>
-                <div className="text-center py-12">
-                  <p className="text-gray-500 mb-4">View contributions to other researchers' work and collaborative projects.</p>
-                  <p className="text-sm text-gray-400">Feature coming soon...</p>
-                </div>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500">No repositories yet.</p>
+          )}
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

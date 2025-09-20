@@ -52,6 +52,22 @@ def create_initial_user_profile(address: str) -> dict:
         logger.error(f"Erro ao criar perfil inicial para {address}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Não foi possível criar o perfil inicial do usuário.")
 
+def update_user_nonce(address: str, nonce: str | None) -> dict:
+    """
+    Define ou limpa (se nonce=None) o nonce de login para um usuário.
+    """
+    logger.info(f"Atualizando nonce para o endereço: {address}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('users').update({"nonce": nonce}).eq('address', address).execute()
+        if not response.data:
+             raise HTTPException(status_code=404, detail="Usuário não encontrado ao tentar atualizar o nonce.")
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar nonce: {e}")
+
+
 async def upload_file_to_supabase(file: UploadFile, user_address: str) -> str:
     """Faz o upload de um arquivo para o Supabase Storage."""
     logger.info(f"Iniciando upload de arquivo para o usuário: {user_address}, arquivo: {file.filename}")
@@ -111,4 +127,227 @@ def insert_or_update_user_profile(
     except Exception as e:
         logger.error(f"Exceção ao fazer upsert do perfil: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro interno ao atualizar o perfil: {e}")
+
+# --- Funções de Serviço para Repositórios (Adicionadas) ---
+
+def create_repository(repo_data: dict) -> dict:
+    """Cria um novo repositório no banco de dados."""
+    logger.info(f"Criando novo repositório: {repo_data.get('name')}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').insert(repo_data).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao criar repositório: {e}")
+
+def get_public_repositories() -> list[dict]:
+    """Lista todos os repositórios públicos."""
+    logger.info("Buscando todos os repositórios públicos.")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('visibility', 'public').execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar repositórios: {e}")
+
+def get_user_repositories(user_address: str) -> list[dict]:
+    """Lista os repositórios de um usuário específico."""
+    logger.info(f"Buscando repositórios para o usuário: {user_address}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('owner_address', user_address).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar repositórios do usuário: {e}")
+
+def get_repository_by_id(repo_id: str) -> dict | None:
+    """Busca um único repositório pelo seu ID."""
+    logger.info(f"Buscando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('repositories').select('*').eq('id', repo_id).single().execute()
+        return response.data
+    except Exception:
+        return None
+
+def update_repository(repo_id: str, update_data: dict) -> dict:
+    """Atualiza os dados de um repositório."""
+    logger.info(f"Atualizando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+        response = supabase.table('repositories').update(update_data).eq('id', repo_id).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar repositório: {e}")
+
+def delete_repository(repo_id: str):
+    """Deleta um repositório."""
+    logger.info(f"Deletando repositório com ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        supabase.table('repositories').delete().eq('id', repo_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar repositório: {e}")
+
+def increment_column(repo_id: str, column_name: str) -> int:
+    """Incrementa um contador (stars, forks) de forma segura usando uma função do DB."""
+    logger.info(f"Incrementando '{column_name}' para o repositório ID: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.rpc('increment_counter', {'repo_id': repo_id, 'column_name': column_name}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao incrementar contador: {e}")
+
+# --- Funções de Serviço para Blocos ---
+
+def create_block(block_data: dict) -> dict:
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('blocks').insert(block_data).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao criar bloco: {e}")
+
+def list_blocks_for_repo(repo_id: str) -> list[dict]:
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('blocks').select('*').eq('repo_id', repo_id).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar blocos: {e}")
+
+def get_block_by_id(block_id: str) -> dict | None:
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('blocks').select('*').eq('id', block_id).single().execute()
+        return response.data
+    except Exception:
+        return None
+
+def update_block(block_id: str, update_data: dict) -> dict:
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+        response = supabase.table('blocks').update(update_data).eq('id', block_id).execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar bloco: {e}")
+
+def delete_block(block_id: str):
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        supabase.table('blocks').delete().eq('id', block_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar bloco: {e}")
+        
+# --- Funções de Serviço para Auditoria (Novas) ---
+
+def create_audit_log_and_update_block(audit_data: dict) -> dict:
+    """
+    Salva o resultado da auditoria da IA e atualiza o status do bloco correspondente.
+    """
+    logger.info(f"Salvando log de auditoria para o bloco: {audit_data.get('block_id')}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    
+    try:
+        # 1. Atualiza o status do bloco
+        block_id = str(audit_data.get('block_id'))
+        new_status = audit_data.get('ai_status')
+        
+        block_update_response = supabase.table('blocks').update({"status": new_status}).eq('id', block_id).execute()
+        if not block_update_response.data:
+            raise HTTPException(status_code=404, detail=f"Bloco com ID {block_id} não encontrado para atualização.")
+        
+        logger.info(f"Status do bloco {block_id} atualizado para '{new_status}'.")
+
+        # 2. Insere o log de auditoria
+        audit_log_response = supabase.table('audit_logs').insert(audit_data).execute()
+        logger.info(f"Log de auditoria para o bloco {block_id} criado com sucesso.")
+        
+        return audit_log_response.data[0]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar log de auditoria: {e}")
+
+def get_audit_logs_for_repo(repo_id: str) -> list[dict]:
+    """
+    Busca todos os logs de auditoria de um repositório específico.
+    """
+    logger.info(f"Buscando logs de auditoria para o repositório: {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        response = supabase.table('audit_logs').select('*').eq('repo_id', repo_id).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar logs de auditoria: {e}")
+
+# --- Funções de Serviço para Favoritos (Novas) ---
+
+def star_repository(user_address: str, repo_id: str):
+    """Adiciona um repositório aos favoritos de um utilizador."""
+    logger.info(f"Utilizador {user_address} a favoritar o repo {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        # Insere o registo na tabela de ligação
+        supabase.table('user_repository_stars').insert({
+            "user_address": user_address,
+            "repo_id": repo_id
+        }).execute()
+        
+        # Incrementa o contador de estrelas no repositório
+        increment_column(repo_id, 'stars')
+        
+    except Exception as e:
+        # Verifica se o erro é de chave duplicada (utilizador já favoritou)
+        if '23505' in str(e):
+             raise HTTPException(status_code=409, detail="Repositório já favoritado.")
+        raise HTTPException(status_code=500, detail=f"Erro ao favoritar repositório: {e}")
+
+def unstar_repository(user_address: str, repo_id: str):
+    """Remove um repositório dos favoritos de um utilizador."""
+    logger.info(f"Utilizador {user_address} a remover favorito do repo {repo_id}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        # Remove o registo da tabela de ligação
+        supabase.table('user_repository_stars').delete().match({
+            "user_address": user_address,
+            "repo_id": repo_id
+        }).execute()
+
+        # Decrementa o contador de estrelas no repositório
+        supabase.rpc('decrement_counter', {'repo_id': repo_id, 'column_name': 'stars'}).execute()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao remover favorito: {e}")
+
+
+def get_starred_repositories_for_user(user_address: str) -> list[dict]:
+    """Busca todos os repositórios favoritados por um utilizador."""
+    logger.info(f"Buscando repositórios favoritados por: {user_address}")
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Serviço de banco de dados indisponível.")
+    try:
+        # Chama a função do PostgreSQL que criámos, que é mais eficiente
+        response = supabase.rpc('get_starred_repos_by_address', {'p_user_address': user_address}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar repositórios favoritados: {e}")
 
