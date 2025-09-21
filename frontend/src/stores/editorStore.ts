@@ -1,62 +1,107 @@
+// src/stores/editorStore.ts
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import { ProofBlock, EdgeLink, EditorState, BlockType } from '@/types/editor';
-import { showSuccessToast, showErrorToast, showWarningToast, showInfoToast } from '@/components/ui/toast-feedback';
+import {
+  showSuccessToast,
+  showErrorToast,
+  showWarningToast,
+  showInfoToast,
+} from '@/components/ui/toast-feedback';
 
 interface EditorStore extends EditorState {
-  addBlock: (type: BlockType, position?: { x: number; y: number }, parentId?: string) => string;
-  updateBlock: (id: string, updates: Partial<Omit<ProofBlock, 'status' | 'aiSummary'>>) => void; // status/aiSummary não por aqui
+  /** Cria bloco. Se vier um bloco do backend em `initial`, o id do backend é preservado */
+  addBlock: (
+    type: BlockType,
+    position?: { x: number; y: number },
+    parentId?: string,
+    initial?: Partial<ProofBlock>
+  ) => ProofBlock;
+
+  /** Atualiza campos do bloco (conteúdo, título etc). */
+  updateBlock: (id: string, updates: Partial<Omit<ProofBlock, 'status' | 'aiSummary'>>) => void;
+
+  /** Atualiza posição do bloco (apenas no estado, não envia para backend). */
   updateBlockPosition: (id: string, position: { x: number; y: number }) => void;
+
+  /** Remove bloco e arestas relacionadas. */
   deleteBlock: (id: string) => void;
+
+  /** Duplica bloco localmente (novo id local). */
   duplicateBlock: (id: string) => void;
+
+  /** Marca qual é o bloco inicial (para ordenação). */
   setStartBlock: (id: string | undefined) => void;
 
+  /** Liga dois blocos (sem ciclos). */
   addEdge: (edge: EdgeLink) => void;
+
+  /** Remove uma aresta. */
   removeEdge: (edgeId: string) => void;
 
+  /** Seleciona um bloco. */
   selectBlock: (id: string | undefined) => void;
+
+  /** Abre o Drawer do bloco selecionado (ou de um específico). */
   openDrawer: (blockId?: string) => void;
+
+  /** Fecha Drawer. */
   closeDrawer: () => void;
 
+  /** Limpa tudo (estado do editor). */
   clearAll: () => void;
 
-  // Auditoria IA (mock front-only)
+  /** Mock de auditoria por IA (front-only). */
   requestAIAudit: (id: string) => void;
 
+  /** Retorna blocos ordenados a partir do startBlock (fallback: todos) */
   getOrderedBlocks: () => ProofBlock[];
+
+  /** Validação básica do bloco antes de salvar. */
   validateBlock: (block: ProofBlock) => boolean;
+
+  /** Troca um id local por um id real do backend (e atualiza edges/seleção). */
+  replaceBlockId: (oldId: string, newBlock: ProofBlock) => void;
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
-  // Estado inicial ZERADO
+  // Estado inicial
   startBlockId: undefined,
   blocks: [],
   edges: [],
   selectedBlockId: undefined,
   isDrawerOpen: false,
 
-  addBlock: (type, position = { x: 250, y: 250 }, parentId) => {
-    const id = nanoid();
+  /**
+   * Cria bloco localmente.
+   * - Se `initial?.id` existir (hidratação do backend), preserva esse id.
+   * - Caso contrário, gera um nanoid local.
+   */
+  addBlock: (type, position = { x: 250, y: 250 }, parentId, initial) => {
+    const id = initial?.id ?? nanoid();
+
     const newBlock: ProofBlock = {
       id,
       type,
-      title: '',            // força usuário a preencher
-      description: '',
-      status: 'in_review',  // sempre começa em revisão
-      aiSummary: undefined, // IA ainda não descreveu
+      title: initial?.title ?? '',
+      description: initial?.description ?? '',
+      status: (initial?.status as ProofBlock['status']) ?? 'in_review',
+      aiSummary: initial?.aiSummary ?? undefined,
       position,
-      content: {}
+      content: initial?.content ?? {},
     };
 
     set((state) => ({
       blocks: [...state.blocks, newBlock],
-      selectedBlockId: id
+      selectedBlockId: id,
     }));
 
-    // conectar ao pai se houver (sem duplicata/self-loop/ciclo)
+    // Conectar ao pai (sem duplicata/self-loop/ciclo)
     if (parentId && parentId !== id) {
       const edgeId = `e${parentId}-${id}`;
-      const dup = get().edges.some(e => e.id === edgeId || (e.source === parentId && e.target === id));
+      const dup = get().edges.some(
+        (e) => e.id === edgeId || (e.source === parentId && e.target === id)
+      );
       if (!dup) {
         const wouldCreateCycle = (newEdge: EdgeLink): boolean => {
           const edges = [...get().edges, newEdge];
@@ -65,14 +110,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           const dfs = (n: string): boolean => {
             if (stack.has(n)) return true;
             if (visited.has(n)) return false;
-            visited.add(n); stack.add(n);
-            for (const e of edges.filter(e => e.source === n)) if (dfs(e.target)) return true;
-            stack.delete(n); return false;
+            visited.add(n);
+            stack.add(n);
+            for (const e of edges.filter((e) => e.source === n)) {
+              if (dfs(e.target)) return true;
+            }
+            stack.delete(n);
+            return false;
           };
           return dfs(newEdge.source);
         };
         if (!wouldCreateCycle({ id: edgeId, source: parentId, target: id })) {
-          set((s) => ({ edges: [...s.edges, { id: edgeId, source: parentId, target: id }] }));
+          set((s) => ({
+            edges: [...s.edges, { id: edgeId, source: parentId, target: id }],
+          }));
         } else {
           showWarningToast('Connection would create a cycle');
         }
@@ -80,37 +131,39 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
 
     if (!get().startBlockId) set({ startBlockId: id });
-    showSuccessToast(`${type.charAt(0).toUpperCase() + type.slice(1)} block created`);
-    return id;
+
+    // Só mostra “created” quando não é hidratação
+    if (!initial?.id) {
+      showSuccessToast(`${type.charAt(0).toUpperCase() + type.slice(1)} block created`);
+    }
+
+    return newBlock;
   },
 
-  // NÃO permite mudar status/aiSummary por aqui (apenas requestAIAudit)
   updateBlock: (id, updates) =>
     set((state) => ({
-      blocks: state.blocks.map(b =>
-        b.id === id ? { ...b, ...updates } : b
-      )
+      blocks: state.blocks.map((b) => (b.id === id ? { ...b, ...updates } : b)),
     })),
 
   updateBlockPosition: (id, position) =>
     set((state) => ({
-      blocks: state.blocks.map(b => (b.id === id ? { ...b, position } : b))
+      blocks: state.blocks.map((b) => (b.id === id ? { ...b, position } : b)),
     })),
 
   deleteBlock: (id) => {
-    const blk = get().blocks.find(b => b.id === id);
+    const blk = get().blocks.find((b) => b.id === id);
     if (!blk) return;
     set((state) => ({
-      blocks: state.blocks.filter(b => b.id !== id),
-      edges: state.edges.filter(e => e.source !== id && e.target !== id),
+      blocks: state.blocks.filter((b) => b.id !== id),
+      edges: state.edges.filter((e) => e.source !== id && e.target !== id),
       selectedBlockId: state.selectedBlockId === id ? undefined : state.selectedBlockId,
-      startBlockId: state.startBlockId === id ? undefined : state.startBlockId
+      startBlockId: state.startBlockId === id ? undefined : state.startBlockId,
     }));
     showSuccessToast(`${blk.title || 'Block'} deleted`);
   },
 
   duplicateBlock: (id) => {
-    const blk = get().blocks.find(b => b.id === id);
+    const blk = get().blocks.find((b) => b.id === id);
     if (!blk) return;
     const newId = nanoid();
     const copy: ProofBlock = {
@@ -119,7 +172,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       title: blk.title ? `${blk.title} (Copy)` : 'Untitled (Copy)',
       status: 'in_review',
       aiSummary: undefined,
-      position: { x: blk.position.x + 50, y: blk.position.y + 50 }
+      position: { x: blk.position.x + 50, y: blk.position.y + 50 },
     };
     set((state) => ({ blocks: [...state.blocks, copy] }));
     showSuccessToast(`${blk.title || 'Block'} duplicated`);
@@ -135,7 +188,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       showWarningToast('Cannot connect a block to itself');
       return;
     }
-    const dup = get().edges.some(e => e.id === edge.id || (e.source === edge.source && e.target === edge.target));
+    const dup = get().edges.some(
+      (e) => e.id === edge.id || (e.source === edge.source && e.target === edge.target)
+    );
     if (dup) return;
 
     const wouldCreateCycle = (newEdge: EdgeLink): boolean => {
@@ -145,9 +200,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const dfs = (n: string): boolean => {
         if (stack.has(n)) return true;
         if (visited.has(n)) return false;
-        visited.add(n); stack.add(n);
-        for (const e of edges.filter(e => e.source === n)) if (dfs(e.target)) return true;
-        stack.delete(n); return false;
+        visited.add(n);
+        stack.add(n);
+        for (const e of edges.filter((e) => e.source === n)) {
+          if (dfs(e.target)) return true;
+        }
+        stack.delete(n);
+        return false;
       };
       return dfs(newEdge.source);
     };
@@ -160,14 +219,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   removeEdge: (edgeId) =>
-    set((state) => ({ edges: state.edges.filter(e => e.id !== edgeId) })),
+    set((state) => ({ edges: state.edges.filter((e) => e.id !== edgeId) })),
 
   selectBlock: (id) => set({ selectedBlockId: id }),
 
   openDrawer: (blockId) =>
     set({
       isDrawerOpen: true,
-      selectedBlockId: blockId ?? get().selectedBlockId
+      selectedBlockId: blockId ?? get().selectedBlockId,
     }),
 
   closeDrawer: () => set({ isDrawerOpen: false }),
@@ -178,36 +237,34 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       blocks: [],
       edges: [],
       selectedBlockId: undefined,
-      isDrawerOpen: false
+      isDrawerOpen: false,
     }),
 
-  // Auditoria IA (demo): gera um resumo e define Approved/Rejected
   requestAIAudit: (id) => {
-    const block = get().blocks.find(b => b.id === id);
+    const block = get().blocks.find((b) => b.id === id);
     if (!block) return;
     if (!block.title || !block.title.trim()) {
       showErrorToast('Please set a Title before requesting AI audit.');
       return;
     }
 
-    // Geração simples de resumo (mock)
     const base = `This block (“${block.title.trim()}”) summarizes a ${block.type} step: `;
     const detailByType: Record<string, string> = {
       text: 'it contains narrative or markdown content relevant to the research.',
       image: 'it includes an illustrative figure or setup photo supporting the methodology.',
       video: 'it provides a recorded demonstration or experiment capture.',
       audio: 'it provides a recorded explanation, interview, or sensor audio.',
-      reference: 'it lists bibliographic sources that support this step.'
+      reference: 'it lists bibliographic sources that support this step.',
     };
-    const aiSummary = base + (detailByType[block.type] || 'it contains supporting materials.');
+    const aiSummary =
+      base + (detailByType[block.type] || 'it contains supporting materials.');
 
-    // “Lógica” mock para aprovar/reprovar (pura demo)
     const approved = block.title.trim().length >= 3;
 
     set((state) => ({
-      blocks: state.blocks.map(b =>
+      blocks: state.blocks.map((b) =>
         b.id === id ? { ...b, aiSummary, status: approved ? 'approved' : 'rejected' } : b
-      )
+      ),
     }));
 
     showInfoToast('AI audit completed (demo).');
@@ -224,14 +281,18 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
       ordered.push(nodeId);
-      edges.filter(e => e.source === nodeId).forEach(e => traverse(e.target));
+      edges
+        .filter((e) => e.source === nodeId)
+        .forEach((e) => traverse(e.target));
     };
 
     traverse(startBlockId);
-    blocks.forEach(b => { if (!visited.has(b.id)) ordered.push(b.id); });
+    blocks.forEach((b) => {
+      if (!visited.has(b.id)) ordered.push(b.id);
+    });
 
     return ordered
-      .map(id => blocks.find(b => b.id === id))
+      .map((id) => blocks.find((b) => b.id === id))
       .filter(Boolean) as ProofBlock[];
   },
 
@@ -240,13 +301,35 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       showErrorToast('Title is required');
       return false;
     }
-    if (block.type === 'reference' && block.content.reference) {
-      const ref = block.content.reference;
+    if (block.type === 'reference' && (block.content as any)?.reference) {
+      const ref = (block.content as any).reference;
       if (!ref.author?.trim() || !ref.title?.trim() || !ref.year?.trim()) {
         showErrorToast('Reference requires author, title, and year');
         return false;
       }
     }
     return true;
-  }
+  },
+
+  /**
+   * Troca um id local (ex.: nanoid) pelo id real do backend (UUID),
+   * atualizando edges e seleção.
+   */
+  replaceBlockId: (oldId, newBlock) =>
+    set((s) => {
+      const blocks = s.blocks.map((b) => (b.id === oldId ? { ...newBlock } : b));
+
+      const edges = s.edges.map((e) => {
+        const newSource = e.source === oldId ? newBlock.id : e.source;
+        const newTarget = e.target === oldId ? newBlock.id : e.target;
+        const newId =
+          e.id === `e${e.source}-${e.target}` ? `e${newSource}-${newTarget}` : e.id;
+        return { ...e, source: newSource, target: newTarget, id: newId };
+      });
+
+      const selectedBlockId = s.selectedBlockId === oldId ? newBlock.id : s.selectedBlockId;
+      const startBlockId = s.startBlockId === oldId ? newBlock.id : s.startBlockId;
+
+      return { blocks, edges, selectedBlockId, startBlockId };
+    }),
 }));

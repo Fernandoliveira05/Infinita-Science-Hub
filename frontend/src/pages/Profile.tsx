@@ -9,6 +9,8 @@ import {
   Edit3,
   Save,
   X,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { Navbar } from "@/components/layouts/Navbar";
 
@@ -19,7 +21,7 @@ const repoApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/repos" });
 [userApi, repoApi].forEach((api) =>
   api.interceptors.request.use((config) => {
     const token = localStorage.getItem("jwt_token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token) (config.headers as any).Authorization = `Bearer ${token}`;
     return config;
   })
 );
@@ -27,7 +29,9 @@ const repoApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/repos" });
 type UserProfile = {
   address: string;
   username?: string;
+  email?: string;
   bio?: string;
+  description?: string;
   profile_image_url?: string;
 };
 
@@ -43,6 +47,7 @@ type Repository = {
 
 const Profile = () => {
   const { userId } = useParams();
+
   const [user, setUser] = useState<UserProfile | null>(null);
   const [repos, setRepos] = useState<Repository[]>([]);
   const [isOwner, setIsOwner] = useState(false);
@@ -51,76 +56,120 @@ const Profile = () => {
   // edit mode
   const [editMode, setEditMode] = useState(false);
   const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   const [newBio, setNewBio] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isRemovingAvatar, setIsRemovingAvatar] = useState(false);
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        let res;
-        if (userId) {
-          res = await userApi.get(`/${userId}`);
-          setIsOwner(false);
-        } else {
-          res = await userApi.get("/me");
-          setIsOwner(true);
-        }
-        setUser(res.data);
-        setNewUsername(res.data.username || "");
-        setNewBio(res.data.bio || "");
-      } catch (err) {
-        console.error("Error loading profile:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    let alive = true;
 
-    const fetchRepos = async () => {
+    (async () => {
       try {
-        const res = userId
+        setLoading(true);
+
+        // 1) Carrega o perfil alvo (público ou o seu)
+        const profileRes = userId
+          ? await userApi.get(`/${userId}`)
+          : await userApi.get("/me");
+        if (!alive) return;
+
+        const target = profileRes.data as UserProfile;
+        setUser(target);
+        setNewUsername(target.username || "");
+        setNewEmail(target.email || "");
+        setNewBio(target.bio || "");
+        setNewDescription(target.description || "");
+
+        // 2) Verifica se o logado é o dono: busca /me (se houver token) e compara address
+        let loggedAddress: string | null = null;
+        try {
+          const meRes = await userApi.get("/me");
+          loggedAddress = (meRes.data?.address || "").toLowerCase();
+        } catch {
+          // sem JWT ou erro — deixa loggedAddress como null
+        }
+        const targetAddress = (target.address || "").toLowerCase();
+        setIsOwner(!!loggedAddress && loggedAddress === targetAddress);
+
+        // 3) Repositórios do usuário alvo (ou seus)
+        const reposRes = userId
           ? await repoApi.get(`/mine`, {
-              headers: { "X-User-Address": userId }, // ajustar backend se necessário
+              // Se seu backend aceitar esse header para listar de outro usuário
+              headers: { "X-User-Address": userId },
             })
           : await repoApi.get("/mine");
-        setRepos(res.data);
+        if (!alive) return;
+        setRepos(reposRes.data || []);
       } catch (err) {
-        console.error("Error loading repositories:", err);
+        if (!alive) return;
+        console.error("Error loading profile or repos:", err);
+      } finally {
+        if (alive) setLoading(false);
       }
-    };
+    })();
 
-    fetchProfile();
-    fetchRepos();
+    return () => {
+      alive = false;
+    };
   }, [userId]);
 
   const handleUpdateProfile = async () => {
     try {
+      setIsSaving(true);
       const res = await userApi.put("/me", {
-        username: newUsername,
-        bio: newBio,
+        username: newUsername || null,
+        email: newEmail || null,
+        bio: newBio || null,
+        description: newDescription || null,
       });
       setUser(res.data);
-      alert("Profile updated successfully!");
       setEditMode(false);
-    } catch (err) {
+      alert("Profile updated successfully!");
+    } catch (err: any) {
       console.error(err);
-      alert("Error updating profile");
+      alert(err?.response?.data?.detail || "Error updating profile");
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleUploadAvatar = async () => {
     if (!avatarFile) return;
-    const formData = new FormData();
-    formData.append("file", avatarFile);
     try {
+      setIsUploadingAvatar(true);
+      const formData = new FormData();
+      formData.append("file", avatarFile);
       const res = await userApi.post("/me/avatar", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setUser(res.data);
-      alert("Avatar updated!");
       setAvatarFile(null);
-    } catch (err) {
+      alert("Avatar updated!");
+    } catch (err: any) {
       console.error(err);
-      alert("Error updating avatar");
+      alert(err?.response?.data?.detail || "Error updating avatar");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!user?.profile_image_url) return;
+    if (!confirm("Remove current avatar?")) return;
+    try {
+      setIsRemovingAvatar(true);
+      // precisa existir no backend: DELETE /api/users/me/avatar
+      await userApi.delete("/me/avatar");
+      setUser((prev) => (prev ? { ...prev, profile_image_url: undefined } : prev));
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.response?.data?.detail || "Error removing avatar");
+    } finally {
+      setIsRemovingAvatar(false);
     }
   };
 
@@ -134,7 +183,7 @@ const Profile = () => {
         {/* Profile Header */}
         <div className="card-professional mb-8">
           <div className="flex flex-col md:flex-row gap-8">
-            {/* Avatar */}
+            {/* Avatar + ações */}
             <div className="flex flex-col items-center md:items-start">
               <div className="w-32 h-32 rounded-2xl overflow-hidden mb-4 shadow-lg relative">
                 <img
@@ -144,52 +193,99 @@ const Profile = () => {
                 />
               </div>
 
-              {/* Upload avatar in edit mode */}
               {isOwner && editMode && (
-                <div className="flex flex-col gap-2 mb-4">
+                <div className="flex flex-col gap-2 mb-4 w-full max-w-xs">
                   <input
                     type="file"
-                    onChange={(e) =>
-                      setAvatarFile(e.target.files?.[0] || null)
-                    }
+                    accept="image/*"
+                    onChange={(e) => setAvatarFile(e.target.files?.[0] || null)}
                     className="text-sm"
                   />
-                  <button
-                    onClick={handleUploadAvatar}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" /> Upload Avatar
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleUploadAvatar}
+                      disabled={!avatarFile || isUploadingAvatar}
+                      className="btn-primary flex items-center gap-2"
+                    >
+                      {isUploadingAvatar ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4" />
+                      )}
+                      Upload Avatar
+                    </button>
+
+                    {user.profile_image_url && (
+                      <button
+                        onClick={handleRemoveAvatar}
+                        disabled={isRemovingAvatar}
+                        className="btn-ghost border border-rose-300 text-rose-700 hover:bg-rose-50 flex items-center gap-2"
+                      >
+                        {isRemovingAvatar ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
+              {/* Campos do perfil */}
               {!editMode ? (
                 <>
                   <h1 className="text-3xl font-bold">
                     {user.username || "Your Name Here"}
                   </h1>
-                  <p className="text-gray-600">
+                  <p className="text-gray-600 mt-1">
                     {user.bio || "Tell us about yourself..."}
                   </p>
+                  {user.description && (
+                    <p className="text-gray-500 mt-2 whitespace-pre-wrap">
+                      {user.description}
+                    </p>
+                  )}
+                  {user.email && (
+                    <p className="text-gray-500 mt-2">{user.email}</p>
+                  )}
                 </>
               ) : (
-                <div className="flex flex-col gap-2 w-full max-w-sm">
-                  <input
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    className="input-professional w-full"
-                    placeholder="Enter your username"
-                  />
+                <div className="flex flex-col gap-3 w-full max-w-xl">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      className="input-professional w-full"
+                      placeholder="Username"
+                    />
+                    <input
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      className="input-professional w-full"
+                      placeholder="Email"
+                    />
+                  </div>
                   <textarea
                     value={newBio}
                     onChange={(e) => setNewBio(e.target.value)}
                     className="input-professional w-full"
-                    placeholder="Write a short bio"
+                    placeholder="Short bio"
+                    rows={2}
+                  />
+                  <textarea
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    className="input-professional w-full"
+                    placeholder="Profile description (longer text)"
+                    rows={4}
                   />
                 </div>
               )}
 
-              {/* Buttons */}
+              {/* Botões de ação — visíveis só para o dono */}
               {isOwner && (
                 <div className="flex gap-3 mt-4">
                   {!editMode ? (
@@ -203,12 +299,25 @@ const Profile = () => {
                     <>
                       <button
                         onClick={handleUpdateProfile}
+                        disabled={isSaving}
                         className="btn-primary flex items-center gap-2"
                       >
-                        <Save className="w-4 h-4" /> Save
+                        {isSaving ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4" />
+                        )}
+                        {isSaving ? "Saving…" : "Save"}
                       </button>
                       <button
-                        onClick={() => setEditMode(false)}
+                        onClick={() => {
+                          setEditMode(false);
+                          setNewUsername(user.username || "");
+                          setNewEmail(user.email || "");
+                          setNewBio(user.bio || "");
+                          setNewDescription(user.description || "");
+                          setAvatarFile(null);
+                        }}
                         className="btn-ghost flex items-center gap-2"
                       >
                         <X className="w-4 h-4" /> Cancel
@@ -243,8 +352,7 @@ const Profile = () => {
                         {repo.description || "No description provided"}
                       </p>
                       <p className="text-gray-400 text-xs">
-                        Updated{" "}
-                        {new Date(repo.updated_at).toLocaleDateString()}
+                        Updated {new Date(repo.updated_at).toLocaleDateString()}
                       </p>
                     </div>
                     <span className="text-xs px-2 py-1 rounded bg-gray-200">

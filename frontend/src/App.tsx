@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Routes, Route } from "react-router-dom"; // ⟵ sem BrowserRouter aqui
+import { Routes, Route, Navigate } from "react-router-dom"; // ⟵ sem BrowserRouter aqui
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Explore from "./pages/Explore";
@@ -21,17 +21,26 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      {/* NÃO coloque <BrowserRouter> aqui */}
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/favorites" element={<Favorite />} />
         <Route path="/login" element={<Login />} />
         <Route path="/explore" element={<Explore />} />
+
+        {/* Páginas de repositório */}
         <Route path="/repository/:id" element={<Repository />} />
-        <Route path="/editor" element={<Editor />} />
-        <Route path="/profile/:userId" element={<Profile />} />
-        <Route path="*" element={<NotFound />} />
         <Route path="/MyRepository" element={<MyRepository />} />
+
+        {/* Editor */}
+        <Route path="/editor" element={<Editor />} />               {/* criar novo */}
+        <Route path="/editor/:repoId" element={<Editor />} />       {/* editar existente */}
+
+        {/* Perfil */}
+        <Route path="/profile/:userId" element={<Profile />} />
+
+        {/* Redirecionamentos/404 opcionais */}
+        <Route path="/repository" element={<Navigate to="/explore" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </TooltipProvider>
   </QueryClientProvider>

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+// src/pages/Editor.tsx
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Navbar } from "../components/layouts/Navbar";
 import {
@@ -16,7 +17,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, Save, Play, X } from "lucide-react";
+import { Save, Play, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEditorStore } from "@/stores/editorStore";
 import { ProofNode } from "@/components/editor/ProofNode";
@@ -30,6 +31,7 @@ import { FaVideo } from "react-icons/fa6";
 import { MdAudiotrack } from "react-icons/md";
 import { VscReferences } from "react-icons/vsc";
 import axios from "axios";
+import { useRepoStore } from "@/stores/repoStore";
 
 const nodeTypes = { proofBlock: ProofNode };
 const INTRO_KEY = "ishub_seen_intro_v1";
@@ -60,9 +62,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// layout efêmero horizontal
+const START_X = 80;
+const START_Y = 160;
+const H_SPACING = 360; // distância entre cards
+
 const Editor = () => {
   const params = useParams<{ repoId: string }>();
   const [repoId, setRepoId] = useState<string | null>(params.repoId || null);
+
+  // repo store (RepoHeader lê daqui)
+  const repoStore = useRepoStore();
+  const repoStoreAny = repoStore as any;
 
   const {
     blocks,
@@ -75,12 +86,7 @@ const Editor = () => {
     getOrderedBlocks,
     selectedBlockId,
     clearAll,
-    updateBlockPosition,
   } = useEditorStore();
-
-  // repo info
-  const [repoName, setRepoName] = useState("");
-  const [repoDescription, setRepoDescription] = useState("");
 
   // Intro modal
   const [showIntro, setShowIntro] = useState(false);
@@ -92,29 +98,71 @@ const Editor = () => {
     setShowIntro(false);
   };
 
-  // ReactFlow state
-  const reactFlowNodes: Node[] = blocks.map((block) => ({
-    id: block.id, // id DO BACKEND após hidratação
-    type: "proofBlock",
-    position: block.position || { x: 100, y: 100 },
-    data: block as Record<string, unknown>,
-    selected: selectedBlockId === block.id,
-  }));
+  // =========== POSIÇÃO SOMENTE EM MEMÓRIA ===========
+  const autoLayoutPosRef = useRef<Record<string, { x: number; y: number }>>({});
+  const sessionPosRef = useRef<Record<string, { x: number; y: number }>>({});
 
-  const reactFlowEdges: Edge[] = edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    type: "smoothstep",
-    animated: true,
-    style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
-  }));
+  const computeInlinePositions = useCallback(() => {
+    const ordered = getOrderedBlocks();
+    const next: Record<string, { x: number; y: number }> = {};
+    let x = START_X;
+    const y = START_Y;
+    for (const b of ordered) {
+      next[b.id] = { x, y };
+      x += H_SPACING;
+    }
+    autoLayoutPosRef.current = next;
+  }, [getOrderedBlocks]);
+
+  const ensureSequentialEdges = useCallback(() => {
+    const ordered = getOrderedBlocks();
+    if (ordered.length < 2) return;
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const a = ordered[i];
+      const b = ordered[i + 1];
+      const id = `e${a.id}-${b.id}`;
+      const exists =
+        edges.some(
+          (e) => e.id === id || (e.source === a.id && e.target === b.id)
+        );
+      if (!exists) {
+        addStoreEdge({ id, source: a.id, target: b.id });
+      }
+    }
+  }, [edges, addStoreEdge, getOrderedBlocks]);
+
+  const reactFlowNodes: Node[] = useMemo(
+    () =>
+      blocks.map((block) => ({
+        id: block.id,
+        type: "proofBlock",
+        position:
+          sessionPosRef.current[block.id] ||
+          autoLayoutPosRef.current[block.id] || { x: START_X, y: START_Y },
+        data: block as Record<string, unknown>,
+        selected: selectedBlockId === block.id,
+      })),
+    [blocks, selectedBlockId]
+  );
+
+  const reactFlowEdges: Edge[] = useMemo(
+    () =>
+      edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: "smoothstep",
+        animated: true,
+        style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+      })),
+    [edges]
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(reactFlowNodes);
   const [flowEdges, setEdges, onEdgesChange] = useEdgesState(reactFlowEdges);
 
-  useEffect(() => setNodes(reactFlowNodes), [blocks, selectedBlockId, setNodes]);
-  useEffect(() => setEdges(reactFlowEdges), [edges, setEdges]);
+  useEffect(() => setNodes(reactFlowNodes), [reactFlowNodes, setNodes]);
+  useEffect(() => setEdges(reactFlowEdges), [reactFlowEdges, setEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -130,7 +178,6 @@ const Editor = () => {
       )
         return;
       addStoreEdge({ id, source: connection.source, target: connection.target });
-      // (Opcional) persistir edges no back aqui se tiver endpoint
     },
     [addStoreEdge, edges]
   );
@@ -148,80 +195,92 @@ const Editor = () => {
     [removeEdge]
   );
 
-  // Persistir posição SOMENTE quando soltar o nó
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
-
-      changes.forEach(async (c) => {
+      changes.forEach((c) => {
         if (c.type === "position" && c.position && c.id) {
-          updateBlockPosition(c.id, c.position);
-
-          // @ts-expect-error dragging existe em runtime
-          const dragging = c.dragging as boolean | undefined;
-          if (dragging === false || dragging === undefined) {
-            try {
-              await api.put(`/blocks/${c.id}`, { position: c.position });
-            } catch (err) {
-              console.error("Erro ao salvar posição do bloco:", err);
-            }
-          }
+          sessionPosRef.current[c.id] = { x: c.position.x, y: c.position.y };
         }
       });
     },
-    [onNodesChange, updateBlockPosition]
+    [onNodesChange]
   );
 
   // ---------------------------
-  // Backend Integration helpers
+  // Backend helpers
   // ---------------------------
+  const loadBlocksFromApi = useCallback(
+    async (rId: string) => {
+      const res = await api.get(`/blocks/repo/${rId}`);
+      clearAll();
 
-  const loadBlocksFromApi = useCallback(async (rId: string) => {
-    const res = await api.get(`/blocks/repo/${rId}`);
-    clearAll();
-    // IMPORTANTE: Hidratar store com os dados 1:1 do backend (incluindo id do backend!)
-    res.data.forEach((block: any) => {
-      addBlock(block.type, block.position || { x: 100, y: 100 }, undefined, block);
-    });
-    return res.data as any[];
-  }, [clearAll, addBlock]);
+      // Hidrata SEM posição do backend
+      res.data.forEach((block: any) => {
+        const clone = { ...block };
+        delete clone.position;
+        addBlock(clone.type, undefined, undefined, clone);
+      });
 
-  // Carregar repo + blocos
+      // reseta layout efêmero
+      sessionPosRef.current = {};
+      computeInlinePositions();
+      ensureSequentialEdges();
+
+      return res.data as any[];
+    },
+    [clearAll, addBlock, computeInlinePositions, ensureSequentialEdges]
+  );
+
+  // Carregar repo + blocos e **SINCRONIZAR COM o repoStore**
   useEffect(() => {
-    if (!repoId) return;
+    const id = params.repoId || repoId || (repoStore as any)?.repo?.id;
+    if (!id) return;
 
     api
-      .get(`/repos/${repoId}`)
+      .get(`/repos/${id}`)
       .then((res) => {
-        setRepoName(res.data.name || "");
-        setRepoDescription(res.data.description || "");
+        const r = res.data;
+        setRepoId(r.id);
+
+        // ---- MUITO IMPORTANTE: popular o store que o RepoHeader usa ----
+        if (typeof repoStoreAny.setRepo === "function") {
+          repoStoreAny.setRepo(r);
+        } else {
+          if (typeof repoStoreAny.setId === "function") repoStoreAny.setId(r.id);
+          if (typeof repoStoreAny.setName === "function") repoStoreAny.setName(r.name || "");
+          if (typeof repoStoreAny.setDescription === "function")
+            repoStoreAny.setDescription(r.description || "");
+          if (typeof repoStoreAny.setVisibility === "function")
+            repoStoreAny.setVisibility(r.visibility || "public");
+        }
       })
       .catch((err) => console.error("Erro ao carregar repo:", err));
 
-    loadBlocksFromApi(repoId).catch((err) =>
+    loadBlocksFromApi(id).catch((err) =>
       console.error("Erro ao carregar blocos:", err)
     );
-  }, [repoId, loadBlocksFromApi]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.repoId]);
+
+  const effectiveRepoId =
+    repoId || (repoStore as any)?.repo?.id || null;
 
   const handleAddBlock = async (type: BlockType) => {
-    if (!repoId) {
+    if (!effectiveRepoId) {
       alert("You need to save the repository first!");
       return;
     }
-    const pos = { x: 200, y: 200 };
     try {
       const res = await api.post("/blocks", {
-        repo_id: repoId,
+        repo_id: effectiveRepoId,
         type,
         title: "",
         description: "",
-        position: pos,
       });
 
-      // Após criar, **rehidrata** para garantir que o ID da store é o do backend
-      await loadBlocksFromApi(repoId);
+      await loadBlocksFromApi(effectiveRepoId);
 
-      // Seleciona o recém-criado
       const newId = res.data.id;
       selectBlock(newId);
       openDrawer(newId);
@@ -238,7 +297,6 @@ const Editor = () => {
         title: block.title,
         description: block.description,
         content: block.content,
-        position: block.position,
       });
       alert(`Block saved and sent to AI audit!`);
     } catch (err) {
@@ -248,21 +306,20 @@ const Editor = () => {
 
   const handleSaveRepository = async () => {
     try {
-      if (!repoId) {
-        // Primeiro save => cria repo
+      if (!effectiveRepoId) {
         const res = await api.post("/repos", {
-          name: repoName || "Untitled Repository",
-          description: repoDescription || "",
-          visibility: "public",
+          name: repoStoreAny?.repo?.name || "Untitled Repository",
+          description: repoStoreAny?.repo?.description || "",
+          visibility: repoStoreAny?.repo?.visibility || "public",
         });
-        setRepoId(res.data.id); // mantém na mesma página
-        // nada de reload/redirect
+        setRepoId(res.data.id);
+        if (typeof repoStoreAny.setRepo === "function") repoStoreAny.setRepo(res.data);
       } else {
-        // Updates subsequentes
-        await api.put(`/repos/${repoId}`, {
-          name: repoName,
-          description: repoDescription,
+        const res = await api.put(`/repos/${effectiveRepoId}`, {
+          name: repoStoreAny?.repo?.name,
+          description: repoStoreAny?.repo?.description,
         });
+        if (typeof repoStoreAny.setRepo === "function") repoStoreAny.setRepo(res.data);
       }
     } catch (err) {
       console.error("Erro ao salvar repositório:", err);
@@ -270,9 +327,11 @@ const Editor = () => {
   };
 
   const handleSubmitFinalReview = async () => {
-    if (!repoId) return;
+    if (!effectiveRepoId) return;
     try {
-      const res = await api.post(`/audits/repos/${repoId}/submit-final-review`);
+      const res = await api.post(
+        `/audits/repos/${effectiveRepoId}/submit-final-review`
+      );
       alert(`Final review submitted. Audits: ${res.data.audit_count}`);
     } catch (err) {
       console.error("Erro ao submeter revisão final:", err);
@@ -282,18 +341,14 @@ const Editor = () => {
   // ---------------------------
   // UI
   // ---------------------------
-
   const orderedBlocks = getOrderedBlocks();
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-      <RepoHeader
-        repoName={repoName}
-        setRepoName={setRepoName}
-        repoDescription={repoDescription}
-        setRepoDescription={setRepoDescription}
-      />
+
+      {/* RepoHeader lê do useRepoStore; agora store é preenchido ao carregar */}
+      <RepoHeader onSaved={(id) => setRepoId(id)} />
 
       <FirstTimeHelp />
 
@@ -305,8 +360,9 @@ const Editor = () => {
           className="flex items-center gap-2"
         >
           <Save className="w-4 h-4" />
-          {repoId ? "Update Repository" : "Save Repository"}
+          {effectiveRepoId ? "Update Repository" : "Save Repository"}
         </Button>
+
         {selectedBlockId && (
           <Button
             onClick={() => handleSaveBlock(selectedBlockId)}
@@ -316,6 +372,7 @@ const Editor = () => {
             <Save className="w-4 h-4" /> Save Block
           </Button>
         )}
+
         <Button
           onClick={handleSubmitFinalReview}
           variant="secondary"
@@ -340,9 +397,7 @@ const Editor = () => {
                   onClick={() => handleAddBlock(type)}
                   className="flex flex-col items-center gap-2 h-auto p-4"
                 >
-                  <div
-                    className={`w-10 h-10 ${color} rounded-lg flex items-center justify-center`}
-                  >
+                  <div className={`w-10 h-10 ${color} rounded-lg flex items-center justify-center`}>
                     <Icon className="text-white" size={18} />
                   </div>
                   <span className="text-sm capitalize">{type}</span>

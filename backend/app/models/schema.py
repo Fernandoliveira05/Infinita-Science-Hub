@@ -9,9 +9,10 @@ from uuid import UUID
 class UserProfile(BaseModel):
     address: str
     username: Optional[str] = None
-    email: Optional[str] = None  # Campo adicionado
+    email: Optional[str] = None
     bio: Optional[str] = None
-    profile_image_url: Optional[str] = None  # Nome da coluna corrigido
+    description: Optional[str] = None  # <-- NOVO (descrição longa do perfil)
+    profile_image_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -23,7 +24,8 @@ class UpdateUserProfile(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     bio: Optional[str] = None
-    # O profile_image_url é atualizado por uma rota específica de upload, por isso não está aqui.
+    description: Optional[str] = None  # <-- NOVO (descrição longa do perfil)
+    # O profile_image_url é atualizado por uma rota específica de upload.
 
     class Config:
         orm_mode = True
@@ -37,12 +39,8 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    
 
 # ================== Modelos de Repositório (Nova Versão) ==================
-
-# ================== Modelos de Repositório ==================
-# Estes modelos já suportam a nova funcionalidade de favoritos.
 
 class Collaborator(BaseModel):
     address: str
@@ -73,6 +71,7 @@ class RepositoryOut(RepositoryBase):
 
     class Config:
         orm_mode = True
+
 # ================== Modelos de Bloco (Novos) ==================
 
 class BlockBase(BaseModel):
@@ -122,7 +121,7 @@ class BlockAuditResult(BaseModel):
     prediction_id: str
     block_id: UUID
     repo_id: UUID
-    ai_status: str = Field(..., pattern="^(approved|rejected)$") # Garante que o valor seja um dos dois
+    ai_status: str = Field(..., pattern="^(approved|rejected)$")
     ai_description: str
     raw_response: Optional[Dict[str, Any]] = None
 
@@ -140,4 +139,3 @@ class AuditLogOut(BaseModel):
 
     class Config:
         orm_mode = True
-
