@@ -18,7 +18,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { ProofBlock } from '@/types/editor';
 import { showSuccessToast, showErrorToast } from '@/components/ui/toast-feedback';
 
-const api = axios.create({ baseURL: 'http://127.0.0.1:8000/api' });
+const api = axios.create({ baseURL: 'http://localhost:55403/api' });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('jwt_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;

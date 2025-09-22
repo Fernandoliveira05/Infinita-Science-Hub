@@ -5,7 +5,7 @@ import axios from "axios";
 import { GitFork, DollarSign, Star } from "lucide-react";
 import Navbar from "../components/layouts/Navbar";
 
-const repoApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/repos" });
+const repoApi = axios.create({ baseURL: "http://localhost:55403/api/repos" });
 
 repoApi.interceptors.request.use((config) => {
   const token = localStorage.getItem("jwt_token");

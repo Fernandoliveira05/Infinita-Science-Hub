@@ -28,9 +28,9 @@ import "@xyflow/react/dist/style.css";
 import { ProofNode } from "@/components/editor/ProofNode";
 
 // ================= API =================
-const publicApi = axios.create({ baseURL: "http://127.0.0.1:8000/api" });
+const publicApi = axios.create({ baseURL: "http://localhost:55403/api" });
 
-const authenticatedApi = axios.create({ baseURL: "http://127.0.0.1:8000/api" });
+const authenticatedApi = axios.create({ baseURL: "http://localhost:55403/api" });
 authenticatedApi.interceptors.request.use((config) => {
   const token = localStorage.getItem("jwt_token");
   if (token) (config.headers as any).Authorization = `Bearer ${token}`;

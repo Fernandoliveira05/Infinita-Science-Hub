@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 
 class Settings(BaseSettings):
     # FastAPI Config
@@ -24,21 +24,28 @@ class Settings(BaseSettings):
     database_url: str
 
     # CORS
-    cors_origins: list[str] = ["*"]
+    cors_origins: List[str] = ["*"] # Usando List[str] para consistência de importação
 
     # --- NOVAS CONFIGURAÇÕES PARA INTEGRAÇÃO DA IA ---
-
-    # URL do webhook no N8N que recebe os dados do bloco para análise.
-    # Se não for definida, o envio para a IA será pulado.
     N8N_BLOCK_ANALYSIS_URL: Optional[str] = None
-
-    # Um segredo compartilhado entre nossa API e a IA (N8N) para proteger o webhook.
-    # A IA deve enviar este segredo no header 'x-webhook-secret'.
     WEBHOOK_SECRET: Optional[str] = None
+
+    # --- CAMPOS QUE ESTAVAM FALTANDO ---
+    # Adicionados para o frontend
+    VITE_SUPABASE_URL: str
+    VITE_SUPABASE_BUCKET: str
+
+    # Adicionados para a integração com Blockchain
+    SERVER_PRIVATE_KEY: str
+    ETHEREUM_NODE_URL: str
+    CONTRACT_ADDRESS: str
+
 
     class Config:
         # Pede para o Pydantic carregar as variáveis de um arquivo .env
         env_file = ".env"
+        # Boa prática: garante que 'MY_VAR' no .env corresponda a 'my_var' no Pydantic
+        case_sensitive = False
 
 # Cria uma instância única das configurações para ser usada em toda a aplicação
 settings = Settings()

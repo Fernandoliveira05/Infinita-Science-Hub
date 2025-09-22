@@ -11,7 +11,7 @@ import { AuthWidget } from "./Explore";
 // ==========================================================
 // É uma boa prática centralizar a configuração do Axios para não repetir a lógica de headers.
 const authenticatedApi = axios.create({
-  baseURL: "http://127.0.0.1:8000/api",
+  baseURL: "http://localhost:55403/api",
 });
 
 // Este "interceptor" adiciona o token JWT a todas as chamadas feitas com `authenticatedApi`

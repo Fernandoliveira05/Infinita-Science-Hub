@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { Navbar } from "@/components/layouts/Navbar";
 
-const userApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/users" });
-const repoApi = axios.create({ baseURL: "http://127.0.0.1:8000/api/repos" });
+const userApi = axios.create({ baseURL: "http://localhost:55403/api/users" });
+const repoApi = axios.create({ baseURL: "http://localhost:55403/api/repos" });
 
 // interceptors para JWT
 [userApi, repoApi].forEach((api) =>

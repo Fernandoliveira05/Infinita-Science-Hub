@@ -15,12 +15,12 @@ import { Button } from "@/components/ui/button";
 
 // 1. Cliente para chamadas PÚBLICAS (não envia token)
 const publicApi = axios.create({
-  baseURL: "http://127.0.0.1:8000/api",
+  baseURL: "http://localhost:55403/api",
 });
 
 // 2. Cliente para chamadas AUTENTICADAS (envia o token JWT)
 const authenticatedApi = axios.create({
-  baseURL: "http://127.0.0.1:8000/api",
+  baseURL: "http://localhost:55403/api",
 });
 
 // Interceptor que adiciona o token JWT APENAS ao cliente autenticado

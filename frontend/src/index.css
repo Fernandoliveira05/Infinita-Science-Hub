@@ -218,3 +218,31 @@ Professional, mature design for scientific research platform
   40% { transform: translateY(-4px); }
   60% { transform: translateY(-2px); }
 }
+
+/* Animação para chamar a atenção do usuário para o botão de salvar */
+@keyframes shake-and-glow {
+  0% {
+    transform: translateX(0);
+    box-shadow: 0 0 10px hsl(var(--primary) / 0);
+  }
+  10%, 30%, 50% {
+    transform: translateX(-5px);
+  }
+  20%, 40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(0);
+    box-shadow: 0 0 15px 5px hsl(var(--primary) / 0.5);
+  }
+  100% {
+    transform: translateX(0);
+    box-shadow: 0 0 10px hsl(var(--primary) / 0);
+  }
+}
+
+.shake-and-glow {
+  animation: shake-and-glow 1.5s ease-in-out;
+}
+
+
